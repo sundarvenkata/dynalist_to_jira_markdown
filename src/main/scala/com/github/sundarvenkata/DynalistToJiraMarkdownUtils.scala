@@ -10,7 +10,7 @@ object DynalistToJiraMarkdownUtils {
   private val hyperlinkPatternInOPML = raw"\[(.+)\]\(([^ ]+)\)".r
   private val boldPatternInOPML = raw"\*\*((?:(?!\*\*).)+)\*\*".r
   private val italicPatternInOPML = raw"__(.+)__".r
-  private val codeNotePatternInOPML = raw"`(.+)`".r
+  private val codeNotePatternInOPML = raw"```(.+)```".r
   private val tagMentionPatternInOPML = raw"@[A-Za-z]+[0-9]*[A-Za-z]*".r
 
   def transformHyperlink(hyperLinkNodeText: String, wholeNodeText: String): String = {
@@ -59,7 +59,7 @@ object DynalistToJiraMarkdownUtils {
     wholeNodeText.replace(tagMentionNodeText, "[~%s]".format(tagMentionNodeText.replace("@", "")))
   }
 
-  def transformTagMentions(nodeText: String): String = {    
+  def transformTagMentions(nodeText: String): String = {
     val firstTagMentionMatch = tagMentionPatternInOPML.findFirstIn(nodeText)
     firstTagMentionMatch match {
       case Some(firstMatch) => transformTagMentions(transformTagMention(firstMatch, nodeText))
@@ -89,38 +89,39 @@ object DynalistToJiraMarkdownUtils {
     val mapper = new ObjectMapper();
     val json = mapper.writeValueAsString(jsonObject);
     val node: JsonNode = mapper.readTree(json);
-    JsonPath.query("$.*[?(@['id']=='%s')]".format(node_id), node).right.get.map(x =>  mapper.convertValue(x, classOf[java.util.LinkedHashMap[String, Object]])).next()    
+    JsonPath.query("$.*[?(@['id']=='%s')]".format(node_id), node).right.get.map(x =>  mapper.convertValue(x, classOf[java.util.LinkedHashMap[String, Object]])).next()
   }
 
   def getJiraMarkdown(node: java.util.LinkedHashMap[String, Object], jsonObject: Object, level: Int = 1,
                       checkBoxFlag: Boolean = false): String = {
-  val isChecked = node.get("checked").asInstanceOf[Boolean]
-  val isCheckbox = checkBoxFlag || node.get("checkbox").asInstanceOf[Boolean]
-  val nodeContent = node.get("content").toString.trim
-  val checkBoxSymbol: String = if (isCheckbox) if (isChecked) "(/) " else "(x) " else ""
-	val transformedNodeText: String =
-	if (!nodeContent.equals("")) ("*" * level) + " " + checkBoxSymbol + transformNodeText(nodeContent) else ""
-	
-	val transformedNodeNote: String = {
-	if (node.containsKey("note")) {
-	  val nodeNote = node.get("note").toString.trim
-	  if (!nodeNote.equals("")) ("*" * level) + " " + transformNodeNote(nodeNote) else ""
-	}
-	else ""
-	}
+    val isCheckbox = checkBoxFlag || node.get("checkbox").asInstanceOf[Boolean]
+    val nodeContent = node.get("content").toString.trim
+    val isChecked = node.get("checked").asInstanceOf[Boolean]
+    val isFailed = nodeContent.toLowerCase().contains("failed")
+    val checkBoxSymbol: String = if (isCheckbox) if (isChecked && !isFailed) "(/) " else if (isFailed) "(x) " else "" else ""
+    val transformedNodeText: String =
+      if (!nodeContent.equals("")) ("*" * level) + " " + checkBoxSymbol + transformNodeText(nodeContent) else ""
 
-	val childrenJiraMarkdown = {
-	if (node.containsKey("children") && !transformedNodeText.contains("MESS") && !transformedNodeText.contains("STATUS_CHECK") && !transformedNodeText.contains("OPS_NOTE")) {
-	  node.get("children").asInstanceOf[java.util.ArrayList[String]].stream()
-	    .map(child_node => getJiraMarkdown(getNodeJson(child_node, jsonObject), jsonObject, level + 1, isCheckbox))
-	    .toArray()
-	}
-	else Array()
-	}
+    val transformedNodeNote: String = {
+      if (node.containsKey("note")) {
+        val nodeNote = node.get("note").toString.trim
+        if (!nodeNote.equals("")) ("*" * level) + " " + transformNodeNote(nodeNote) else ""
+      }
+      else ""
+    }
 
-	(Array[String](transformedNodeText, transformedNodeNote) ++ childrenJiraMarkdown)
-	.map(a => a.toString)
-	.filter(resultString => !(resultString.equals("") ||  resultString.contains("STATUS_CHECK") || resultString.contains("MESS") || resultString.contains("OPS_NOTE")))
-	.mkString("\n")    
+    val childrenJiraMarkdown = {
+      if (node.containsKey("children") && !transformedNodeText.contains("MESS") && !transformedNodeText.contains("STATUS_CHECK") && !transformedNodeText.contains("OPS_NOTE")) {
+        node.get("children").asInstanceOf[java.util.ArrayList[String]].stream()
+          .map(child_node => getJiraMarkdown(getNodeJson(child_node, jsonObject), jsonObject, level + 1, isCheckbox))
+          .toArray()
+      }
+      else Array()
+    }
+
+    (Array[String](transformedNodeText, transformedNodeNote) ++ childrenJiraMarkdown)
+      .map(a => a.toString)
+      .filter(resultString => !(resultString.equals("") || resultString.contains("STATUS_CHECK") || resultString.contains("MESS") || resultString.contains("OPS_NOTE")))
+      .mkString("\n")
   }
 }
